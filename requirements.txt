@@ -1,0 +1,5 @@
+argparse
+filemagic
+r2pipe
+apkid
+click
