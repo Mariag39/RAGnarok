@@ -4,7 +4,7 @@
 
 #
 #                          RAGnarok
-#                     Radare APK Games
+#                     Radare2 in Android Games
 #      by Maria Garcia Raldua
 #
 #      credits to Michael Helwig (@c0dmtr1x / www.codemetrix.net)
@@ -15,15 +15,21 @@
 #
 
 from __future__ import print_function
+from pyfiglet import Figlet
 import r2pipe
+import delegator
 import sys,os,subprocess
 import shutil,itertools,argparse,zipfile
 import magic
 from xml.dom.minidom import parseString
 import sys
 import os
-ROOT_DIR='/c/Users/María/RACnarok'
-ROOT_DIR='/mnt/c/Users/María/RACnarok'
+ROOT_DIR='/mnt/c/Users/María/RAGnarok/RAGnarok'
+import click
+from rich import print
+
+
+
 
 
 path = os.path.join(ROOT_DIR + '/mobsfAPI.py')
@@ -36,9 +42,7 @@ mob = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mob)
 
 
- 
-# Path to apktool
-apktool=os.path.join(ROOT_DIR + '/apktool/apktool.jar')
+
 dcheck = os.path.join('./dependency-check/bin/dependency-check.sh')
 # Checks for strings, imports, methods and symbols
 apkchecks =  {"strings":[".apk",".dex"]}
@@ -50,7 +54,7 @@ httpschecks = {"imports":["javax/net/ssl"]}
 otherchecks = {"strings":["user","token","api_key","pass","admin","secret","encrypt","decrypt","credit"],"methods":["health","level","pass","admin","secret","encrypt","decrypt"]}
 
 # Filter (only for urls in assets at the moment)
-filter_urls = ["http://schemas.android.com/"]
+filter_urls = [b'http://schemas.android.com/']
 
 
 
@@ -61,7 +65,7 @@ def r2_check(strings,r2p,r2cmd):
     return results
 
 def r2_check_strings(strings,myr2pipe,message=None):
-    return r2_check(strings,r2p,"izq")
+    return r2_check(strings,myr2pipe,"izq")
 
 def r2_check_classes_and_methods(strings,r2p,message=None):
     return r2_check(strings,r2p,"icq")
@@ -183,287 +187,316 @@ def print_results(analysis_results,messages,r2p):
 
     return
 
-def uploadfile():
-    print(apkfile)
-    return upload(apkfile)
 
 
-
-# Argparse
-parser = argparse.ArgumentParser()
-parser.add_argument('--output', '-o', help='output directory')
-parser.add_argument('--dex' , '-d', help='dex file to analyse (skips extraction and disassembly of apk)', action='store_true')
-parser.add_argument('--apkid', help='APK info display',action='store_true')#last addition
-parser.add_argument('--apktool', help='Path to apktool jar file',action='store_true')#last addition
-parser.add_argument('--mobsf', help='Mobsf static analyzer', action='store_true')
-parser.add_argument('--depcheck', help='path to folder to be analyzed by OWASP Dependency check tool', action='store_true')
-parser.add_argument('--skip-extraction',  help='skip decompilation & extraction. Assumes you already have something extracted to output-dir',action='store_true')
-parser.add_argument('--skip-assets',  help='skip asset listing and filetype detection',action='store_true')
-parser.add_argument('--extended', help='Do extended radare2 analysis. Try to find XREFS. This might take some time.', action='store_true')
-parser.add_argument('--cleanup', help='Delete extracted files after completion. WARNING: Deletes contents of output directory', action='store_true')
-parser.add_argument('--cleanup-before', help='Cleanup before extraction. WARNING: Deletes contents of output directory', action='store_true')
-parser.add_argument('apkfile', help="apk file to analyse", nargs='?')
-args = parser.parse_args()
-
-apkfile = args.apkfile
-skip_extraction = args.skip_extraction or args.dex
-skip_disassembly = args.skip_extraction or args.dex
-print(apkfile)
-if not skip_extraction and apkfile is None:
-    print("[!] No file given. Please provide an apkfile (or dexfile with -d option). Use -h for help.")
-    exit(1)
-
-if args.mobsf:
-    resp = mob.upload(apkfile)
-    mob.scan(resp)
-    pdf(resp)
-    
-if args.depcheck:
-    output = subprocess.check_output([dcheck, "-o", ROOT_DIR,"-s", apkfile])
-    print(output)
-
-if not apktool:
-    apktool = args.apktool
-
-# Setting paths
 extract_dir = None
 working_dir = "apk-extracted"
+smali_dir = ""
+asset_dir = ""
+zip_dir = ""
 
-if args.output:
-    extract_dir = args.output
-else:
-    extract_dir = os.getcwd()+ '/' + working_dir
+@click.group()
+@click.option('--output', '-o', required=False,default=None, help='output directory')
+def rag(output: str):
+    custom_fig = Figlet(font='rectangles')
+    click.secho('   ***************************************', fg='blue')
+    click.secho(custom_fig.renderText('  RAGnarok'))
+    click.secho('   ***************************************', fg='blue')
+    click.secho('   Radare2 in Android Games\n   by: Maria Raldu\n', fg='red')
+    global extract_dir
+    if output:
+       
+        extract_dir = output
+    else:
+        
+        extract_dir = os.getcwd()+ '/' + working_dir
 
-zip_dir = extract_dir + "/zip"
-asset_dir = extract_dir + "/zip/assets"
-smali_dir = extract_dir + "/smali"
+    global smali_dir
+    global asset_dir
+    global zip_dir
+    zip_dir = extract_dir + "/zip"
+    smali_dir = extract_dir + "/smali"
+    asset_dir = extract_dir + "/zip/assets"
 
-if not args.skip_extraction and os.path.isdir(extract_dir) and os.listdir(extract_dir) != [] and not args.cleanup_before and not args.dex and not args.mobsf:
-    print("\n[!] " + "Output dir is not empty. Use --cleanup-before to empty output directory.")
-    sys.exit(1)
 
+@rag.command()
+@click.option('--cleanup-before','-c',required=False,default=False, help='Cleanup before extraction. WARNING: Deletes contents of output directory')
+@click.argument('apkfile',nargs=-1,type=click.Path(exists=True),required=True)
+def unzip(apkfile, cleanup_before: bool):
+    """
+        Unpack an APK with unzip.
 
-# Header
-
-print("\n### RAGnarok - Radare2 Android Games (by @raldu) ###")
-
-if args.apkid:
-    print("\n[*] Running APKiD ")
-
-    try:
-        output = subprocess.check_output(["apkid", apkfile])
-        print(output)
-        if not "compiler : dx" in output:
-            print("[*] Notice: APKiD detected non-standard dex compiler (e.g. dexlib) - This might indicate malicious / repackaged APKs.")
-        if "anti_vm" in output:
-            print("[*] Notice: APKiD found possible emulator detection (anti-vm).")
-        if "anti_disassembly" in output:
-            print("[*] Notice: APKiD found anti disassembly measures (anti-disassembly).")
-    except OSError as e:
-        if e.errno == os.errno.ENOENT:
-            print("[*] APKiD not found. Skipping.")
-        else:
-            raise
-
-# Cleanup before
-if args.cleanup_before:
-    print("\n[*] Cleaning up working_dir...")
-    if(os.path.isdir(extract_dir)):
-        shutil.rmtree(extract_dir + "/")
-
-# Extracting APK
-print("\n[*] Extracting to: " + extract_dir)
-
-if not skip_extraction:
+        :return:
+    """
+    # Cleanup before
+    if cleanup_before:
+        print("\n[*] Cleaning up working_dir...")
+        if(os.path.isdir(extract_dir)):
+            shutil.rmtree(extract_dir + "/")
     print("[*] Extracting APK file as zip")
-    if not os.path.isfile(apkfile):
-        sys.exit("APK file not found.")
-    zip_ref = zipfile.ZipFile(apkfile, 'r')
-    zip_ref.extractall(extract_dir + "/zip")
-    zip_ref.close()
+    for apk in apkfile:
+        zip_ref = zipfile.ZipFile(apk, 'r')
+        zip_ref.extractall(extract_dir + '/zip')
+        click.secho('The files have been extracted in /zip folder', fg='green', bold=True)
+        zip_ref.close()
 
-if not skip_disassembly:
-    print("[*] Disassembling apkfile with apktool:")
-    output = subprocess.check_output(["java", "-jar", apktool, "d", apkfile, "-o", smali_dir])
-    print(output)
+@rag.command()
+@click.option('--extended', '-e', required=False, default=False,help='Do extended radare2 analysis. Try to find XREFS. This might take some time.')
+@click.option('--skip-assets', '-sa',required=False,default=False, help='skip asset listing and filetype detection')
+@click.argument('dexlist',nargs=-1,type=click.Path(exists=True),required=True)
+def dex(dexlist,extended: bool, skip_assets: bool):
+    """
+        Analyse dex file with radare2.
 
-if not args.dex:
-    dexlist = get_dex_files(extract_dir + "/zip/")
-    if os.path.isfile(smali_dir + "/AndroidManifest.xml"):
-       print_manifest(smali_dir + "/AndroidManifest.xml")
-    else:
-        print("\n[!] Apktool not found, skipping smali extraction and manifest analysis...")
-else:
-    if args.apkfile and os.path.isfile(args.apkfile):
-        dexlist = [args.apkfile]
-    else:
-        print("[!] Input file not found. Please provide the correct filepath.")
-        sys.exit(1)
-
-print("\n[*] Found " + str(len(dexlist)) + " dexfiles:")
-print(dexlist)
-
-# Dex analysis
-for dexfile in dexlist:
-
-    print("\n[***] Analysing " + dexfile + " [***]")
+        :return:
+    """
     
-    # Open dex with radare2
-    print("\n[*] Opening dexfile with radare2...")
-    r2p=r2pipe.open(dexfile)
 
-    # Analyse with radare2
-    if args.extended:
-        print("\n[*] Analyzing with radare2. This might take some time... ")
-        r2_cmd("aad;aan;aas;",r2p)
+    for dexfile in dexlist:
 
-    # Root detection check
-    rootresults = analyse(rootchecks,r2p)
-    print_results(rootresults,{"found":"\n[*] Possible root detection found in %s:","not_found":"\n[*] No signs of root detection in %s"},r2p)
+        print("\n[***] Analysing " + dexfile + " [***]")
+        
+        # Open dex with radare2
+        print("\n[*] Opening dexfile with radare2...")
+        r2p=r2pipe.open(dexfile)
 
-    # References to APKs and dex files
-    apkresults = analyse(apkchecks,r2p)
-    print_results(apkresults,{"found":"\n[*] References to apks or dexfiles found in %s:","not_found":"\n[*] No references to apks and dexfiles found in %s"},r2p)
+        # Analyse with radare2
+        if extended:
+            print("\n[*] Analyzing with radare2. This might take some time... ")
+            r2_cmd("aad;aan;aas;",r2p)
 
-    # Check for urls
-    urlresults = analyse(urlchecks,r2p)
-    print_results(urlresults,{"found":"\n[*] Possible URLs found in %s","not_found":"\n[*] No URLs found in %s"},r2p)
+        # Root detection check
+        rootresults = analyse(rootchecks,r2p)
+        print_results(rootresults,{"found":"\n[*] Possible root detection found in %s:","not_found":"\n[*] No signs of root detection in %s"},r2p)
 
-    # Check for crypto:
-    cryptoresults = analyse(cryptochecks,r2p)
-    print_results(cryptoresults,{"found":"\n[*] Possible crypto stuff found in %s","not_found":"\n[*] No crypto stuff found in %s"},r2p)
+        # References to APKs and dex files
+        apkresults = analyse(apkchecks,r2p)
+        print_results(apkresults,{"found":"\n[*] References to apks or dexfiles found in %s:","not_found":"\n[*] No references to apks and dexfiles found in %s"},r2p)
 
-    # Check for file access
-    fileresults = analyse(filechecks,r2p)
-    print_results(fileresults,{"found":"\n[*] Possible file access / references found in %s","not_found":"\n[*] No file access / references found in %s"},r2p)
+        # Check for urls
+        urlresults = analyse(urlchecks,r2p)
+        print_results(urlresults,{"found":"\n[*] Possible URLs found in %s","not_found":"\n[*] No URLs found in %s"},r2p)
 
-    # Check for https
-    httpsresults = analyse(httpschecks,r2p)
-    print_results(httpsresults,{"found":"\n[*] Possible https / certificate references found in %s","not_found":"\n[*] No https / certificate references found in %s"},r2p)
+        # Check for crypto:
+        cryptoresults = analyse(cryptochecks,r2p)
+        print_results(cryptoresults,{"found":"\n[*] Possible crypto stuff found in %s","not_found":"\n[*] No crypto stuff found in %s"},r2p)
 
-    # Check for passwords and other interesting strings
-    otherresults = analyse(otherchecks,r2p)
-    print_results(otherresults,{"found":"\n[*] Further interesting stuff found in %s","not_found":"\n[*] No more interesting things found in %s"},r2p)
+        # Check for file access
+        fileresults = analyse(filechecks,r2p)
+        print_results(fileresults,{"found":"\n[*] Possible file access / references found in %s","not_found":"\n[*] No file access / references found in %s"},r2p)
 
+        # Check for https
+        httpsresults = analyse(httpschecks,r2p)
+        print_results(httpsresults,{"found":"\n[*] Possible https / certificate references found in %s","not_found":"\n[*] No https / certificate references found in %s"},r2p)
 
-print("\n[***] End of dex analysis [***]")
-
-if args.dex:
-    print("\n[*] Done")
-    sys.exit(0)
+        # Check for passwords and other interesting strings
+        otherresults = analyse(otherchecks,r2p)
+        print_results(otherresults,{"found":"\n[*] Further interesting stuff found in %s","not_found":"\n[*] No more interesting things found in %s"},r2p)
 
 
-# Check for native libraries (folders)
-lib_dir = extract_dir + "/zip/" + "lib"
-if os.path.isdir(lib_dir):
-    print("\n[*] Native libraries found:")
-    for root, dirs, files in os.walk(lib_dir):
-        for file in files:
-            print(os.path.join(root,file))
-else:
-    print("\n[*] No native libraries found")
+        print("\n[***] End of dex analysis [***]")
 
-# Output assets
-if not args.skip_assets:
-    if os.path.isdir(asset_dir):
-        print("\n[*] Assets found:")
-        with magic.Magic() as m:
-            for root, dirs, files in os.walk(asset_dir):
-                for file in files:
-                    filetype = m.id_filename(os.path.join(root,file))
-                    print(os.path.join(root,file) + " - " + filetype)
+
+    # Check for native libraries (folders)
+    print('dir ' + extract_dir)
+    lib_dir = extract_dir + "/zip/" + "lib"
+    if os.path.isdir(lib_dir):
+        print("\n[*] Native libraries found:")
+        for root, dirs, files in os.walk(lib_dir):
+            for file in files:
+                print(os.path.join(root,file))
     else:
-        print("\n[*] No assets found")
+        print("\n[*] No native libraries found")
 
 
-print("\n[*] Looking for interesting filetypes and files:")
-for root, dirs, files in os.walk(extract_dir + "/zip/"):
-    for file in files:
-        interesting_types = ["certificate", "serialize", "json", "database"]
-        interesting_exts = ["jks","apk","crt","cert","pem","rsa"]
-        filepath = os.path.join(root,file)
 
-        with magic.Magic() as m:
-            filetype = m.id_filename(filepath)
-        if (any(x in filetype.lower() for x in interesting_types) or filetype == "data"):
-            print(" " + filepath + " - " + filetype)
-        elif os.path.splitext(filepath) and len(os.path.splitext(filepath)) > 1:
-            if any(x in os.path.splitext(filepath)[1].lower() for x in interesting_exts):
-                print(" " + filepath + " - " + filetype)
-
-# Looking for IPs
-if os.path.isdir(zip_dir):
-    print("\n[*] Looking for IPv4s in unzipped APK file")
-    try:
-        result = subprocess.check_output(["grep","-arnoE","[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}", zip_dir])
-        print(result)
-    except subprocess.CalledProcessError as e:
-        if e.returncode == 1:
-            print(" -> No results found")
+    # Output assets
+    if not skip_assets:
+        if os.path.isdir(asset_dir):
+            print("\n[*] Assets found:")
+            with magic.Magic() as m:
+                for root, dirs, files in os.walk(asset_dir):
+                    for file in files:
+                        filetype = m.id_filename(os.path.join(root,file))
+                        print(os.path.join(root,file) + " - " + filetype)
         else:
-            print(" [!] Error executing grep")
-    if os.path.isdir(smali_dir + "/res"):
-        print("\n[*] Looking for IPv4s in extracted ressources")
+            print("\n[*] No assets found")
+
+
+    print("\n[*] Looking for interesting filetypes and files:")
+    for root, dirs, files in os.walk(extract_dir + "/zip/"):
+        for file in files:
+            interesting_types = ["certificate", "serialize", "json", "database"]
+            interesting_exts = ["jks","apk","crt","cert","pem","rsa"]
+            filepath = os.path.join(root,file)
+
+            with magic.Magic() as m:
+                filetype = m.id_filename(filepath)
+            if (any(x in filetype.lower() for x in interesting_types) or filetype == "data"):
+                print(" " + filepath + " - " + filetype)
+            elif os.path.splitext(filepath) and len(os.path.splitext(filepath)) > 1:
+                if any(x in os.path.splitext(filepath)[1].lower() for x in interesting_exts):
+                    print(" " + filepath + " - " + filetype)
+
+    # Looking for IPs
+    if os.path.isdir(zip_dir):
+        print("\n[*] Looking for IPv4s in unzipped APK file")
         try:
-            result = subprocess.check_output(["grep","-arnoE","[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}", smali_dir + "/res"])
-            print(result)
+            result = subprocess.check_output(["grep","-arnoE","[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}", zip_dir])
+            print(result.decode('utf-8'))
         except subprocess.CalledProcessError as e:
             if e.returncode == 1:
                 print(" -> No results found")
             else:
                 print(" [!] Error executing grep")
+        if os.path.isdir(smali_dir + "/res"):
+            print("\n[*] Looking for IPv4s in extracted ressources")
+            try:
+                result = subprocess.check_output(["grep","-arnoE","[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}", smali_dir + "/res"])
+                print(result.decode('utf-8'))
+            except subprocess.CalledProcessError as e:
+                if e.returncode == 1:
+                    print(" -> No results found")
+                else:
+                    print(" [!] Error executing grep")
 
-# Looking for URLs in assets
-if os.path.isdir(zip_dir):
-    print("\n[*] Looking for URLs in unzipped APK file")
-    try:
-        result = subprocess.check_output(["grep","-arnoE","(http|https|file|ftp)://[a-zA-Z0-9?/._=-]+" ,zip_dir])
-        filtered = True
-        for line in result.split("\n"):
-            if not any(x in line for x in filter_urls) and line != "":
-                print(line)
-                filtered = False
-        if filtered:
-            print(" -> No interesting results found (filtered)")
-    except subprocess.CalledProcessError as e:
-        if e.returncode == 1:
-            print(" -> No results found")
-        else:
-            print(" [!] Error executing grep")
-    if os.path.isdir(smali_dir + "/res"):
-        print("\n[*] Looking for URLs in extracted ressources")
+    # Looking for URLs in assets
+    if os.path.isdir(zip_dir):
+        print("\n[*] Looking for URLs in unzipped APK file")
         try:
-            result = subprocess.check_output(["grep","-arnoE","(http|https|file|ftp)://[a-zA-Z0-9?/._=-]+", smali_dir + "/res" ])
+            result = subprocess.check_output(["grep","-arnoE","(http|https|file|ftp)://[a-zA-Z0-9?/._=-]+" ,zip_dir])
             filtered = True
-            for line in result.split("\n"):
-                if not any(x in line for x in filter_urls) and line != "":
-                    print(line)
+            for line in result.split(b'\n'):
+                
+                if not any(x in line for x in filter_urls) and line != b'':
+                    print(line.decode('utf-8'))
                     filtered = False
-            if filtered == True:
+            if filtered:
                 print(" -> No interesting results found (filtered)")
         except subprocess.CalledProcessError as e:
             if e.returncode == 1:
                 print(" -> No results found")
             else:
                 print(" [!] Error executing grep")
+        if os.path.isdir(smali_dir + "/res"):
+            print("\n[*] Looking for URLs in extracted ressources")
+            try:
+                result = subprocess.check_output(["grep","-arnoE","(http|https|file|ftp)://[a-zA-Z0-9?/._=-]+", smali_dir + "/res" ])
+                filtered = True
+               
+                for line in result.split(b"\n"):
+                    if not any(x in line for x in filter_urls) and line != b"":
+                        print(line.decode('utf-8'))
+                        filtered = False
+                if filtered == True:
+                    print(" -> No interesting results found (filtered)")
+            except subprocess.CalledProcessError as e:
+                if e.returncode == 1:
+                    print(" -> No results found")
+                else:
+                    print(" [!] Error executing grep")
 
 
-# Looking for certificates
-if os.path.isdir(zip_dir):
-    print("\n[*] Looking for private / public key files")
-    try:
-        result = subprocess.check_output(["grep","-arnoE","(PRIVATE|PUBLIC) KEY", zip_dir])
-        print(result)
-    except subprocess.CalledProcessError as e:
-        if e.returncode != 1:
-            print(" [!] Error executing grep")
+    # Looking for certificates
+    if os.path.isdir(zip_dir):
+        print("\n[*] Looking for private / public key files")
+        try:
+            result = subprocess.check_output(["grep","-arnoE","(PRIVATE|PUBLIC) KEY", zip_dir])
+            print(result.decode('utf-8'))
+        except subprocess.CalledProcessError as e:
+            if e.returncode != 1:
+                print(" [!] Error executing grep")
+            else:
+                print(" -> No results found")
+
+
+@rag.command()
+@click.argument('apkfile',nargs=-1,type=click.Path(exists=True),required=True)
+def apkid(apkfile):
+    """
+        Analyse apk with ApkID
+
+        :return:
+    """
+    print("\n[*] Running APKiD ")
+    for apk in apkfile:
+        try:
+            o = delegator.run(subprocess.list2cmdline([
+                'apkid',
+                '-r',
+                apk,
+            ]), timeout=60 * 5)
+            print(o.out)
+        except OSError as e:
+            if e.errno == os.errno.ENOENT:
+                print("[*] APKiD not found. Skipping.")
+            else:
+                raise
+
+
+@rag.command()
+@click.argument('apkfile', nargs=-1,type=click.Path(exists=True),required=True)
+def apktool(apkfile):
+    """
+        Dissasembling apk with appktool
+
+        :return:
+    """
+    for apk in apkfile:
+        print("[*] Disassembling apkfile with apktool:")
+        o = delegator.run(subprocess.list2cmdline([
+            'apktool',
+            'decode',
+            '-f',
+            '-r',
+            '-o',
+            smali_dir,
+            apk
+        ]), timeout=60 * 5)
+        
+        if len(o.err) > 0:
+            print('An error may have occurred while extracting the APK.')
+            print(o.err)
         else:
-            print(" -> No results found")
-# Cleanup
-if args.cleanup:
-    print("\n[*] Cleaning up ...")
-    shutil.rmtree(extract_dir)
+            print('The files have been extracted in /{0}'.format(smali_dir))
 
-print("\n[*] Done")
+
+@rag.command()
+@click.option('--pdf', '-p', help='Generate pdf after scan', is_flag=True)
+@click.argument('apkfile',nargs=-1,type=click.Path(exists=True),required=True)
+def mobsf(apkfile,pdf: bool):
+    """
+        Analyse apk with mobsf
+
+        :return:
+    """
+    for apk in apkfile:
+        data = upload(apk)
+        print("[bold green]File downloaded...[/bold green]")
+        scan(data)
+        click.secho('The file has been scanned', fg='green', bold=True)
+        if pdf:
+            pdf_gen(data)
+
+
+@rag.command()
+@click.argument('apkfile',nargs=-1,type=click.Path(exists=True),required=True)
+def depcheck(apkfile):
+    """
+        Analyse dependencies with depcheck
+
+        :return:
+    """
+    for apk in apkfile:
+        output = subprocess.check_output([dcheck, "-o", ROOT_DIR,"-s", apk])
+        print(output)
+
+
+
+if __name__ == '__main__':
+    rag()
+
+
+
 
 

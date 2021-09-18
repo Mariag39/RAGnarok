@@ -29,7 +29,7 @@ def scan(data):
     print(response.text)
 
 
-def pdf(data):
+def pdf_gen(data):
     """Generate PDF Report"""
     print("Generate PDF report")
     headers = {'Authorization': APIKEY}

@@ -18,7 +18,7 @@ sed -i '/^import os/a ROOT_DIR='$ROOT_DIR ragnarok
 mkdir -p ~/bin
 
 cp ragnarok ~/bin
-cp dependency-check/ ~/bin
+cp -r dependency-check/ ~/bin
 
 export PATH="$PATH:$HOME/bin"
 

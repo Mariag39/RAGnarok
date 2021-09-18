@@ -2,4 +2,7 @@ argparse
 filemagic
 r2pipe
 apkid
+rich
+pyfiglet
+delegator.py
 click
