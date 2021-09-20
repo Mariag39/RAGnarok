@@ -24,7 +24,6 @@ import magic
 from xml.dom.minidom import parseString
 import sys
 import os
-ROOT_DIR='/mnt/c/Users/María/RAGnarok/RAGnarok'
 import click
 from rich import print
 
