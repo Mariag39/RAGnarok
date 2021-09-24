@@ -6,7 +6,7 @@ import json
 import requests
 from requests_toolbelt.multipart.encoder import MultipartEncoder
 
-SERVER = "http://127.0.0.1:8000"
+SERVER = "http://127.0.0.1:5000"
 APIKEY = '6d4a6dac120defa899e7349df3deff5f2ab315aa532f4e377b04d8e0d8278873'
 
 

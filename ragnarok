@@ -24,6 +24,7 @@ import magic
 from xml.dom.minidom import parseString
 import sys
 import os
+
 import click
 from rich import print
 
@@ -470,12 +471,12 @@ def mobsf(apkfile,pdf: bool):
         :return:
     """
     for apk in apkfile:
-        data = upload(apk)
+        data = mob.upload(apk)
         print("[bold green]File downloaded...[/bold green]")
-        scan(data)
+        mob.scan(data)
         click.secho('The file has been scanned', fg='green', bold=True)
         if pdf:
-            pdf_gen(data)
+            mob.pdf_gen(data)
 
 
 @rag.command()
